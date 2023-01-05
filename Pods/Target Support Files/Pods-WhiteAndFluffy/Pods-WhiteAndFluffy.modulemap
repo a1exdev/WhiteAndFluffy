@@ -1,0 +1,6 @@
+framework module Pods_WhiteAndFluffy {
+  umbrella header "Pods-WhiteAndFluffy-umbrella.h"
+
+  export *
+  module * { export * }
+}
