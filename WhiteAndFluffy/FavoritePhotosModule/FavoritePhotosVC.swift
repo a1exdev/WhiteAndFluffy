@@ -7,17 +7,12 @@
 
 import UIKit
 
-class FavoritePhotosVC: UIViewController {
+class FavoritePhotosVC: ViewController<FavoritePhotosView> {
     
     var networkService: NetworkServiceProtocol!
     var dataFetcherService: DataFetcherServiceProtocol!
     
-    var photos = [FavoritePhotoModel]()
-    var images = [UIImage]()
-    
-    private let group = DispatchGroup()
-    private let semaphore = DispatchSemaphore(value: 1)
-    private let queue = DispatchQueue(label: "queue")
+    var favoritePhotos = [FavoritePhotoModel]()
     
     init(networkService: NetworkServiceProtocol!, dataFetcherService: DataFetcherServiceProtocol!) {
         super.init(nibName: nil, bundle: nil)
@@ -31,82 +26,43 @@ class FavoritePhotosVC: UIViewController {
     
     override func viewDidLoad() {
         super.viewDidLoad()
-        
         setupNotifications()
     }
     
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        
-        setupTableView()
-        setupConstraints()
-        
-        loadPhotos()
+        setupFavoritePhotosView()
+        fetchPhotos()
     }
     
     private func setupNotifications() {
         NotificationCenter.default.addObserver(
             self,
-            selector: #selector(loadPhotos),
+            selector: #selector(fetchPhotos),
             name: Notification.Name("RefreshFavoritePhotos"),
             object: nil)
     }
     
-    lazy var tableView: UITableView = {
-        let tableView = UITableView(frame: view.frame)
-        tableView.register(UITableViewCell.self, forCellReuseIdentifier: "FavoritePhotoCell")
-        tableView.dataSource = self
-        tableView.delegate = self
-        tableView.translatesAutoresizingMaskIntoConstraints = false
-        return tableView
-    }()
+    @objc private func fetchPhotos() {
     
-    private func setupTableView() {
-        view.addSubview(tableView)
-    }
-    
-    private func setupConstraints() {
-        NSLayoutConstraint.activate([
-            tableView.topAnchor.constraint(equalTo: view.topAnchor),
-            tableView.rightAnchor.constraint(equalTo: view.rightAnchor),
-            tableView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            tableView.leftAnchor.constraint(equalTo: view.leftAnchor)
-        ])
-    }
-    
-    @objc private func loadPhotos() {
-        
-        group.enter()
-        dataFetcherService.fetchFavoritePhotos { [self] likedPhotos in
-            if let likedPhotos {
-                photos = likedPhotos
-                group.leave()
+        dataFetcherService.fetchFavoritePhotos { [weak self] favoritePhotos in
+            if let favoritePhotos {
+                self?.favoritePhotos = favoritePhotos
+                self?.mainView.tableView.reloadData()
             }
         }
-        
-        group.notify(queue: .main) { [self] in
-            queue.async { [self] in
-                images.removeAll()
-                photos.forEach {
-                    semaphore.wait()
-                    networkService.request(url: $0.urls.small, httpMethod: nil) { [self] data, response, error in
-                        guard let data = data, error == nil else { return }
-                        images.append(UIImage(data: data)!)
-                        semaphore.signal()
-                        DispatchQueue.main.async { [self] in
-                            tableView.reloadData()
-                        }
-                    }
-                }
-            }
-        }
+    }
+    
+    private func setupFavoritePhotosView() {
+        mainView.tableView.dataSource = self
+        mainView.tableView.delegate = self
     }
 }
 
 extension FavoritePhotosVC: UITableViewDataSource {
     
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        return images.count
+        return favoritePhotos.count
     }
 }
 
@@ -120,28 +76,43 @@ extension FavoritePhotosVC: UITableViewDelegate {
         
         let cell = tableView.dequeueReusableCell(withIdentifier: "FavoritePhotoCell", for: indexPath)
         
-        var content = cell.defaultContentConfiguration()
-        content.image = images[indexPath.row]
-        content.text = photos[indexPath.row].user.username
-        
-        cell.contentConfiguration = content
+        DispatchQueue.main.async { [weak self] in
+            self?.networkService.request(url: self!.favoritePhotos[indexPath.row].urls.small, httpMethod: nil) { data, response, error in
+                guard let data = data, error == nil else { return }
+                
+                var content = cell.defaultContentConfiguration()
+                content.image = UIImage(data: data)!
+                content.text = self!.favoritePhotos[indexPath.row].user.username
+                cell.contentConfiguration = content
+            }
+        }
         
         return cell
     }
     
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         
-        let detailVC = DetailPhotoVC(dataFetcherService: DataFetcherService(), dataSenderService: DataSenderService())
-        detailVC.modalPresentationStyle = .popover
-        detailVC.photo = images[indexPath.item]
-        detailVC.photoId = photos[indexPath.item].id
-        detailVC.username = photos[indexPath.item].user.username
-        detailVC.creationDate = photos[indexPath.item].createdAt
-        
-        if let place = photos[indexPath.item].user.location {
-            detailVC.location = place
+        networkService.request(url: favoritePhotos[indexPath.item].urls.small, httpMethod: nil) { [weak self] data, response, error in
+            guard let data = data, error == nil else { return }
+            
+            self?.showDetailVC(photo: UIImage(data: data)!,
+                               photoId: self!.favoritePhotos[indexPath.item].id,
+                               username: self!.favoritePhotos[indexPath.item].user.username,
+                               location: self!.favoritePhotos[indexPath.item].user.location ?? "location not specified",
+                               downloads: nil,
+                               creationDate: self!.favoritePhotos[indexPath.item].createdAt)
         }
-        
-        self.present(detailVC, animated: true, completion: nil)
+    }
+    
+    private func showDetailVC(photo: UIImage, photoId: String, username: String, location: String, downloads: Int?, creationDate: String) {
+        let detailVC = DetailPhotoVC(dataFetcherService: DataFetcherService(),
+                                     dataSenderService: DataSenderService(),
+                                     photo: photo,
+                                     photoId: photoId,
+                                     username: username,
+                                     location: location,
+                                     downloads: downloads,
+                                     creationDate: creationDate)
+        present(detailVC, animated: true)
     }
 }

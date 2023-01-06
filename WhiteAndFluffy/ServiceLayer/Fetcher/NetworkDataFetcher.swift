@@ -20,7 +20,7 @@ class NetworkDataFetcher: DataFetcherProtocol {
     }
     
     func fetchGenericJSONData<T>(url: String, jsonResponse: @escaping (T?) -> Void) where T: Decodable {
-        networkService.request(url: url, httpMethod: nil) { [self] (data, response, error) in
+        networkService.request(url: url, httpMethod: nil) { [weak self] (data, response, error) in
             guard error == nil else {
                 print("Error: error calling GET")
                 print(error!)
@@ -35,7 +35,7 @@ class NetworkDataFetcher: DataFetcherProtocol {
                 return
             }
             do {
-                let decoded = decodeJSON(type: T.self, from: data)
+                let decoded = self?.decodeJSON(type: T.self, from: data)
                 jsonResponse(decoded)
             }
         }
